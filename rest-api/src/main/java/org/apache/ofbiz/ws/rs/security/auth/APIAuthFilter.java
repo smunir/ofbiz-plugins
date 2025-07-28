@@ -21,18 +21,18 @@ package org.apache.ofbiz.ws.rs.security.auth;
 import java.io.IOException;
 import java.util.Map;
 
-import javax.annotation.Priority;
+import jakarta.annotation.Priority;
 import jakarta.servlet.ServletContext;
 import jakarta.servlet.http.HttpServletRequest;
-import javax.ws.rs.Priorities;
-import javax.ws.rs.container.ContainerRequestContext;
-import javax.ws.rs.container.ContainerRequestFilter;
-import javax.ws.rs.container.ResourceInfo;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriInfo;
-import javax.ws.rs.ext.Provider;
+import jakarta.ws.rs.Priorities;
+import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.container.ContainerRequestFilter;
+import jakarta.ws.rs.container.ResourceInfo;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
+import jakarta.ws.rs.ext.Provider;
 
 import org.apache.ofbiz.base.util.Debug;
 import org.apache.ofbiz.base.util.UtilValidate;
@@ -76,7 +76,10 @@ public class APIAuthFilter implements ContainerRequestFilter {
     @Override
     public void filter(ContainerRequestContext requestContext) throws IOException {
         String authorizationHeader = requestContext.getHeaderString(HttpHeaders.AUTHORIZATION);
-        if (isServiceResource()) {
+        boolean isService = isServiceResource();
+        boolean isEntity = isEntityResource();
+
+        if (isService) {
             String service = (String) RestApiUtil.extractParams(uriInfo.getPathParameters()).get("serviceName");
             if (UtilValidate.isNotEmpty(service)) {
                 ModelService mdService = null;
@@ -85,20 +88,27 @@ public class APIAuthFilter implements ContainerRequestFilter {
                 } catch (GenericServiceException e) {
                     Debug.logError(e.getMessage(), MODULE);
                 }
-                // Skip auth for services auth=false in service definition and if Authorization header is absent
-                // Still validate the token if it is present even if service being called is auth=false
                 if (mdService != null && !mdService.isAuth() && authorizationHeader == null) {
-                    return;
+                    return; // Skip auth for public services
                 }
             }
         }
+
+        // Apply to both service and entity endpoints
+        if (!isService && !isEntity) {
+            return; // Not a protected REST resource
+        }
+
         Delegator delegator = (Delegator) servletContext.getAttribute("delegator");
+
         if (!isTokenBasedAuthentication(authorizationHeader)) {
             abortWithUnauthorized(requestContext, false, "Unauthorized: Access is denied due to invalid or absent Authorization header.");
             return;
         }
+
         String jwtToken = JWTManager.getHeaderAuthBearerToken(httpRequest);
         Map<String, Object> claims = JWTManager.validateToken(jwtToken, JWTManager.getJWTKey(delegator));
+
         if (claims.containsKey(ModelService.ERROR_MESSAGE)) {
             abortWithUnauthorized(requestContext, true, "Unauthorized: " + (String) claims.get(ModelService.ERROR_MESSAGE));
         } else {
@@ -154,4 +164,7 @@ public class APIAuthFilter implements ContainerRequestFilter {
         return OFBizServiceResource.class.isAssignableFrom(resourceInfo.getResourceClass());
     }
 
+    private boolean isEntityResource() {
+        return org.apache.ofbiz.ws.rs.resources.OFBizEntityResource.class.isAssignableFrom(resourceInfo.getResourceClass());
+    }
 }

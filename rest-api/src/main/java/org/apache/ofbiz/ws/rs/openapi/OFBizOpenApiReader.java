@@ -24,9 +24,9 @@ import java.util.Map;
 import java.util.Set;
 
 import jakarta.servlet.ServletContext;
-import javax.ws.rs.HttpMethod;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.HttpMethod;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.Response;
 
 import org.apache.ofbiz.base.util.Debug;
 import org.apache.ofbiz.base.util.UtilValidate;
@@ -65,6 +65,7 @@ import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.tags.Tag;
+import io.swagger.v3.oas.models.media.ObjectSchema;
 
 public final class OFBizOpenApiReader extends Reader implements OpenApiReader {
     private static final String MODULE = OFBizOpenApiReader.class.getName();
@@ -75,9 +76,9 @@ public final class OFBizOpenApiReader extends Reader implements OpenApiReader {
     private OpenAPI openApi;
     private DispatchContext context;
     private static final Parameter HEADER_CONTENT_TYPE_JSON = new HeaderParameter().name(HttpHeaders.CONTENT_TYPE)
-            .schema(new StringSchema()).example(javax.ws.rs.core.MediaType.APPLICATION_JSON).required(true);
+            .schema(new StringSchema()).example(jakarta.ws.rs.core.MediaType.APPLICATION_JSON).required(true);
     private static final Parameter HEADER_ACCEPT_JSON = new HeaderParameter().name(HttpHeaders.ACCEPT)
-            .schema(new StringSchema()).example(javax.ws.rs.core.MediaType.APPLICATION_JSON).required(true);
+            .schema(new StringSchema()).example(jakarta.ws.rs.core.MediaType.APPLICATION_JSON).required(true);
 
     @Override
     public void setConfiguration(OpenAPIConfiguration openApiConfiguration) {
@@ -94,6 +95,7 @@ public final class OFBizOpenApiReader extends Reader implements OpenApiReader {
         addPredefinedSchemas();
         addExportableServices();
         addApiResources();
+//        addEntityResources();
         openApi.setPaths(paths);
         openApi.setComponents(components);
         return openApi;
@@ -138,13 +140,13 @@ public final class OFBizOpenApiReader extends Reader implements OpenApiReader {
                                 .description("Operation Input Parameters in JSON").name("input");
                         Schema<?> refSchema = new Schema<>();
                         refSchema.$ref("#/components/schemas/" + "api.request." + service.getName());
-                        serviceInParam.content(new Content().addMediaType(javax.ws.rs.core.MediaType.APPLICATION_JSON,
+                        serviceInParam.content(new Content().addMediaType(jakarta.ws.rs.core.MediaType.APPLICATION_JSON,
                                 new MediaType().schema(refSchema)));
                         operation.addParametersItem(serviceInParam);
                     } else if (verb.matches(HttpMethod.POST + "|" + HttpMethod.PUT + "|" + HttpMethod.PATCH)) {
                         RequestBody request = new RequestBody()
                                 .description("Request Body for operation " + op.getDescription())
-                                .content(new Content().addMediaType(javax.ws.rs.core.MediaType.APPLICATION_JSON,
+                                .content(new Content().addMediaType(jakarta.ws.rs.core.MediaType.APPLICATION_JSON,
                                         new MediaType().schema(new Schema<>()
                                                 .$ref("#/components/schemas/" + "api.request." + service.getName()))));
                         operation.setRequestBody(request);
@@ -173,6 +175,150 @@ public final class OFBizOpenApiReader extends Reader implements OpenApiReader {
         });
     }
 
+    private void addEntityResources() {
+        SecurityRequirement security = new SecurityRequirement();
+        security.addList("jwtToken");
+
+        String basePath = "/entity";
+        Tag entityTag = new Tag().name("Entity API").description("OFBiz Generic Entity REST API");
+        openApi.addTagsItem(entityTag);
+
+        // Path parameter for entity name
+        PathParameter entityNameParam = new PathParameter();
+        entityNameParam.setName("entityName");
+        entityNameParam.setDescription("Name of the OFBiz entity (e.g., GlAccount, Person, OrderHeader)");
+        entityNameParam.setRequired(true);
+        entityNameParam.setSchema(new StringSchema());
+
+        // Pagination parameters
+        QueryParameter viewSizeParam = new QueryParameter();
+        viewSizeParam.setName("pageSize");
+        viewSizeParam.setDescription("Number of records per page (pagination)");
+        viewSizeParam.setRequired(false);
+        viewSizeParam.setSchema(new StringSchema());
+
+        QueryParameter viewIndexParam = new QueryParameter();
+        viewIndexParam.setName("pageIndex");
+        viewIndexParam.setDescription("Page offset (0-based index)");
+        viewIndexParam.setRequired(false);
+        viewIndexParam.setSchema(new StringSchema());
+
+        // Standard GET operation for entity list
+        PathItem getEntityPath = new PathItem();
+        Operation getOperation = new Operation();
+        getOperation.setSummary("Query entities");
+        getOperation.setDescription("Retrieve entities filtered by field-value pairs in query parameters");
+        getOperation.addTagsItem("Entity API");
+        getOperation.setOperationId("queryEntities");
+        getOperation.addSecurityItem(security);
+        getOperation.addParametersItem(entityNameParam);
+        getOperation.addParametersItem(viewSizeParam);
+        getOperation.addParametersItem(viewIndexParam);
+        getOperation.addParametersItem(HEADER_ACCEPT_JSON);
+
+        // Dynamic field filtering note
+        getOperation.setDescription(getOperation.getDescription()
+                + "\n\nFilter using any entity field as query parameter (e.g., ?glAccountTypeId=CURRENT_ASSET)");
+
+        ApiResponses getResponses = new ApiResponses();
+        getResponses.addApiResponse("200", new ApiResponse().description("Successfully retrieved entities"));
+        getResponses.addApiResponse("404", new ApiResponse().description("Entity not found"));
+        getOperation.setResponses(getResponses);
+        getEntityPath.setGet(getOperation);
+
+        paths.addPathItem(basePath + "/{entityName}", getEntityPath);
+
+        // GET operation for single entity by primary key
+        PathItem getEntityByIdPath = new PathItem();
+        PathParameter pkValueParam = new PathParameter();
+        pkValueParam.setName("pkValue");
+        pkValueParam.setDescription("Primary key value (e.g., CURRENT_ASSET for GlAccountType)");
+        pkValueParam.setRequired(true);
+        pkValueParam.setSchema(new StringSchema());
+
+        Operation getByIdOperation = new Operation();
+        getByIdOperation.setSummary("Get entity by primary key");
+        getByIdOperation.setDescription("Retrieve a single entity by its primary key");
+        getByIdOperation.addTagsItem("Entity API");
+        getByIdOperation.setOperationId("getEntityById");
+        getByIdOperation.addSecurityItem(security);
+        getByIdOperation.addParametersItem(entityNameParam);
+        getByIdOperation.addParametersItem(pkValueParam);
+        getByIdOperation.addParametersItem(HEADER_ACCEPT_JSON);
+
+        ApiResponses getByIdResponses = new ApiResponses();
+        getByIdResponses.addApiResponse("200", new ApiResponse().description("Successfully retrieved entity"));
+        getByIdResponses.addApiResponse("404", new ApiResponse().description("Entity not found"));
+        getByIdOperation.setResponses(getByIdResponses);
+        getEntityByIdPath.setGet(getByIdOperation);
+
+        paths.addPathItem(basePath + "/{entityName}/{pkValue}", getEntityByIdPath);
+
+        // --- POST: Create Entity ---
+        Operation postOperation = new Operation()
+                .summary("Create a new entity")
+                .description("Create a new entity by posting its field values")
+                .operationId("createEntity")
+                .addTagsItem("Entity API")
+                .addSecurityItem(security)
+                .addParametersItem(entityNameParam)
+                .requestBody(new RequestBody()
+                        .required(true)
+                        .content(new Content().addMediaType("application/json", new MediaType()
+                                .schema(new ObjectSchema().additionalProperties(new StringSchema())))))
+                .responses(new ApiResponses()
+                        .addApiResponse("201", new ApiResponse().description("Entity created"))
+                        .addApiResponse("400", new ApiResponse().description("Error creating entity")));
+
+        PathItem postPath = paths.get(basePath + "/{entityName}");
+        if (postPath == null) postPath = new PathItem();
+        postPath.post(postOperation);
+        paths.addPathItem(basePath + "/{entityName}", postPath);
+
+// --- PUT: Update Entity ---
+        Operation putOperation = new Operation()
+                .summary("Update an existing entity")
+                .description("Update an entity using its primary key and new field values")
+                .operationId("updateEntity")
+                .addTagsItem("Entity API")
+                .addSecurityItem(security)
+                .addParametersItem(entityNameParam)
+                .addParametersItem(pkValueParam)
+                .requestBody(new RequestBody()
+                        .required(true)
+                        .content(new Content().addMediaType("application/json", new MediaType()
+                                .schema(new ObjectSchema().additionalProperties(new StringSchema())))))
+                .responses(new ApiResponses()
+                        .addApiResponse("200", new ApiResponse().description("Entity updated"))
+                        .addApiResponse("404", new ApiResponse().description("Entity not found"))
+                        .addApiResponse("400", new ApiResponse().description("Error updating entity")));
+
+        PathItem putPath = paths.get(basePath + "/{entityName}/{pk}");
+        if (putPath == null) putPath = new PathItem();
+        putPath.put(putOperation);
+        paths.addPathItem(basePath + "/{entityName}/{pk}", putPath);
+
+        // --- DELETE: Delete Entity ---
+        Operation deleteOperation = new Operation()
+                .summary("Delete an entity")
+                .description("Delete an entity using its primary key")
+                .operationId("deleteEntity")
+                .addTagsItem("Entity API")
+                .addSecurityItem(security)
+                .addParametersItem(entityNameParam)
+                .addParametersItem(pkValueParam)
+                .responses(new ApiResponses()
+                        .addApiResponse("204", new ApiResponse().description("Entity deleted"))
+                        .addApiResponse("404", new ApiResponse().description("Entity not found"))
+                        .addApiResponse("400", new ApiResponse().description("Error deleting entity")));
+
+        PathItem deletePath = paths.get(basePath + "/{entityName}/{pk}");
+        if (deletePath == null) deletePath = new PathItem();
+        deletePath.delete(deleteOperation);
+        paths.addPathItem(basePath + "/{entityName}/{pk}", deletePath);
+
+    }
+
     private void addExportableServices() {
         Set<String> serviceNames = context.getAllServiceNames();
         for (String serviceName : serviceNames) {
@@ -198,14 +344,14 @@ public final class OFBizOpenApiReader extends Reader implements OpenApiReader {
                                 .description("Service In Parameters in JSON").name("inParams");
                         Schema<?> refSchema = new Schema<>();
                         refSchema.$ref("#/components/schemas/" + "api.request." + service.getName());
-                        serviceInParam.content(new Content().addMediaType(javax.ws.rs.core.MediaType.APPLICATION_JSON,
+                        serviceInParam.content(new Content().addMediaType(jakarta.ws.rs.core.MediaType.APPLICATION_JSON,
                                 new MediaType().schema(refSchema)));
                         operation.addParametersItem(serviceInParam);
                     }
                     operation.addParametersItem(HEADER_ACCEPT_JSON);
                 } else if (action.matches(HttpMethod.POST + "|" + HttpMethod.PUT + "|" + HttpMethod.PATCH)) {
                     RequestBody request = new RequestBody().description("Request Body for service " + service.getName())
-                            .content(new Content().addMediaType(javax.ws.rs.core.MediaType.APPLICATION_JSON,
+                            .content(new Content().addMediaType(jakarta.ws.rs.core.MediaType.APPLICATION_JSON,
                                     new MediaType().schema(new Schema<>().$ref("#/components/schemas/" + "api.request." + service.getName()))));
                     operation.setRequestBody(request);
                     operation.addParametersItem(HEADER_CONTENT_TYPE_JSON);

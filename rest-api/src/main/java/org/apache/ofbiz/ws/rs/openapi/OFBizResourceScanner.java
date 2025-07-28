@@ -31,6 +31,7 @@ public class OFBizResourceScanner extends JaxrsApplicationAndResourcePackagesAnn
 
     static {
         IGNORED.add("org.apache.ofbiz.ws.rs.resources.OFBizServiceResource");
+        IGNORED.add("org.apache.ofbiz.ws.rs.resources.OFBizEntityResource");
     }
 
     public OFBizResourceScanner() {
